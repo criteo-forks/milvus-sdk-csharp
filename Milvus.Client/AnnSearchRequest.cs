@@ -116,3 +116,37 @@ public sealed class SparseVectorAnnSearchRequest<T> : AnnSearchRequest
     /// </summary>
     public IReadOnlyList<MilvusSparseVector<T>> Vectors { get; }
 }
+
+/// <summary>
+/// Represents an ANN search request for full-text search using BM25.
+/// The query texts are sent to Milvus which uses a server-side BM25 function
+/// to generate sparse embeddings automatically.
+/// </summary>
+public sealed class TextAnnSearchRequest : AnnSearchRequest
+{
+    /// <summary>
+    /// Creates a new ANN search request for full-text search.
+    /// </summary>
+    /// <param name="vectorFieldName">The name of the sparse vector field that has a BM25 function configured.</param>
+    /// <param name="queryTexts">The query texts to search for.</param>
+    /// <param name="limit">The maximum number of results to return.</param>
+    public TextAnnSearchRequest(
+        string vectorFieldName,
+        IReadOnlyList<string> queryTexts,
+        int limit)
+        : base(vectorFieldName, SimilarityMetricType.Bm25, limit)
+    {
+        Verify.NotNull(queryTexts);
+        if (queryTexts.Count == 0)
+        {
+            throw new ArgumentException("At least one query text must be provided", nameof(queryTexts));
+        }
+
+        QueryTexts = queryTexts;
+    }
+
+    /// <summary>
+    /// The query texts to search for.
+    /// </summary>
+    public IReadOnlyList<string> QueryTexts { get; }
+}
