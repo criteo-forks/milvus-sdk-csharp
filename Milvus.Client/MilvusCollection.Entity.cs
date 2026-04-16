@@ -565,6 +565,9 @@ public partial class MilvusCollection
             case SparseVectorAnnSearchRequest<float> sparseRequest:
                 PopulateFloatSparseVectorData(sparseRequest.Vectors, placeholderValue);
                 break;
+            case TextAnnSearchRequest textRequest:
+                PopulateTextData(textRequest.QueryTexts, placeholderValue);
+                break;
             default:
                 throw new ArgumentException($"Unsupported AnnSearchRequest type: {annRequest.GetType()}", nameof(annRequest));
         }
@@ -678,6 +681,17 @@ public partial class MilvusCollection
         foreach (MilvusSparseVector<float> sparseVector in vectors)
         {
             placeholderValue.Values.Add(ByteString.CopyFrom(sparseVector.ToBytes()));
+        }
+    }
+
+    private static void PopulateTextData(
+        IReadOnlyList<string> texts, Grpc.PlaceholderValue placeholderValue)
+    {
+        placeholderValue.Type = Grpc.PlaceholderType.VarChar;
+
+        foreach (string text in texts)
+        {
+            placeholderValue.Values.Add(ByteString.CopyFromUtf8(text));
         }
     }
 
