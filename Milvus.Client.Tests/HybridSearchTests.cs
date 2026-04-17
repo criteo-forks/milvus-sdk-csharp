@@ -837,6 +837,104 @@ public class HybridSearchTests(
     }
 
     [Fact]
+    public async Task HybridSearch_with_BM25_full_text()
+    {
+        // BM25 full-text search requires the server-side Function feature (Milvus 2.5+).
+        if (await Client.GetParsedMilvusVersion() < new Version(2, 5))
+        {
+            return;
+        }
+
+        MilvusCollection collection = Client.GetCollection(nameof(HybridSearch_with_BM25_full_text));
+        await collection.DropAsync();
+
+        // Build a schema with:
+        //   - id (PK)
+        //   - text: VarChar with analyzer enabled -> BM25 input
+        //   - text_sparse: SparseFloatVector -> BM25 output (generated server-side)
+        //   - dense: FloatVector (classic ANN leg of the hybrid search)
+        var schema = new CollectionSchema
+        {
+            Fields =
+            {
+                FieldSchema.Create<long>("id", isPrimaryKey: true),
+                FieldSchema.CreateVarchar("text", maxLength: 512, enableAnalyzer: true),
+                FieldSchema.CreateSparseFloatVector("text_sparse"),
+                FieldSchema.CreateFloatVector("dense", 2),
+            },
+            Functions =
+            {
+                FunctionSchema.CreateBm25("text_bm25", inputFieldName: "text", outputFieldName: "text_sparse"),
+            }
+        };
+
+        await Client.CreateCollectionAsync(collection.Name, schema);
+
+        // Index the dense field and the BM25-generated sparse field.
+        await collection.CreateIndexAsync("dense", IndexType.Flat, SimilarityMetricType.L2);
+        await collection.CreateIndexAsync(
+            "text_sparse", IndexType.SparseInvertedIndex, SimilarityMetricType.Bm25);
+
+        // text_sparse is an output of the BM25 function, so we do NOT insert it.
+        await collection.InsertAsync(
+        [
+            FieldData.Create("id", new[] { 1L, 2L, 3L, 4L, 5L }),
+            FieldData.Create("text", new[]
+            {
+                "white wireless headphones with active noise cancellation",
+                "black gaming headset with a loud microphone",
+                "quiet and comfortable over-ear headphones for long flights",
+                "red running shoes for trail and road",
+                "pink yoga mat with carrying strap"
+            }),
+            FieldData.CreateFloatVector("dense", new ReadOnlyMemory<float>[]
+            {
+                new[] { 1f, 2f },
+                new[] { 1.1f, 2.1f },
+                new[] { 1.2f, 2.2f },
+                new[] { 10f, 20f },
+                new[] { 10.1f, 20.1f },
+            })
+        ]);
+
+        await collection.LoadAsync();
+        await collection.WaitForCollectionLoadAsync(
+            waitingInterval: TimeSpan.FromMilliseconds(100), timeout: TimeSpan.FromMinutes(1));
+
+        // Hybrid search: a BM25 full-text leg + a dense-vector leg, combined with RRF.
+        var results = await collection.HybridSearchAsync(
+            [
+                new TextAnnSearchRequest(
+                    "text_sparse",
+                    ["white headphones quiet comfortable"],
+                    limit: 3),
+                new VectorAnnSearchRequest<float>(
+                    "dense",
+                    [new[] { 1f, 2f }],
+                    SimilarityMetricType.L2,
+                    limit: 3),
+            ],
+            new RrfReranker(),
+            limit: 3,
+            new HybridSearchParameters
+            {
+                OutputFields = { "id", "text" },
+                ConsistencyLevel = ConsistencyLevel.Strong
+            });
+
+        Assert.Equal(collection.Name, results.CollectionName);
+        Assert.NotNull(results.Ids.LongIds);
+        Assert.True(results.Ids.LongIds.Count > 0);
+
+        // The three "headphones" documents (ids 1,2,3) should dominate the ranking,
+        // since they are favored by BOTH the BM25 leg and the dense leg.
+        Assert.All(results.Ids.LongIds, id => Assert.InRange(id, 1L, 3L));
+
+        var textField = (FieldData<string>)results.FieldsData.Single(f => f.FieldName == "text");
+        Assert.Contains(textField.Data, t => t.Contains("headphones"));
+    }
+
+    [Fact]
     public void AnnSearchRequest_ExtraParameters()
     {
         var request = new VectorAnnSearchRequest<float>(

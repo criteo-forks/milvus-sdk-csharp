@@ -37,6 +37,11 @@ public sealed class CollectionSchema
     public IList<FieldSchema> Fields => _fields;
 
     /// <summary>
+    /// Server-side functions declared on the collection (e.g. BM25 full-text).
+    /// </summary>
+    public IList<FunctionSchema> Functions { get; } = new List<FunctionSchema>();
+
+    /// <summary>
     /// Whether to enable dynamic fields for this schema. Defaults to <c>false</c>.
     /// </summary>
     /// <remarks>

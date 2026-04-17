@@ -112,6 +112,8 @@ public sealed class FieldSchema
     /// <param name="defaultValue">
     /// The default value for the field. Available since Milvus v2.5.
     /// </param>
+    /// <param name="enableAnalyzer">Enable a tokenizer/analyzer so the field can feed a BM25 function. Available since Milvus v2.5.</param>
+    /// <param name="analyzerParams">Optional JSON-encoded analyzer configuration. Available since Milvus v2.5.</param>
     public static FieldSchema CreateVarchar(
         string name,
         int maxLength,
@@ -120,10 +122,14 @@ public sealed class FieldSchema
         bool isPartitionKey = false,
         string description = "",
         bool nullable = false,
-        string? defaultValue = null)
+        string? defaultValue = null,
+        bool enableAnalyzer = false,
+        string? analyzerParams = null)
         => new(name, MilvusDataType.VarChar, isPrimaryKey, autoId, isPartitionKey, description, nullable, defaultValue)
         {
-            MaxLength = maxLength
+            MaxLength = maxLength,
+            EnableAnalyzer = enableAnalyzer,
+            AnalyzerParams = analyzerParams
         };
 
     /// <summary>
@@ -366,6 +372,18 @@ public sealed class FieldSchema
     /// The state of the field.
     /// </summary>
     public FieldState State { get; private set; }
+
+    /// <summary>
+    /// Enables a tokenizer/analyzer on this <see cref="MilvusDataType.VarChar"/> field so it can
+    /// feed a BM25 <see cref="FunctionSchema"/> on the server side. Available since Milvus v2.5.
+    /// </summary>
+    public bool EnableAnalyzer { get; set; }
+
+    /// <summary>
+    /// Optional JSON-encoded analyzer configuration (e.g. <c>{"tokenizer":"standard"}</c>) applied
+    /// when <see cref="EnableAnalyzer"/> is <c>true</c>. Available since Milvus v2.5.
+    /// </summary>
+    public string? AnalyzerParams { get; set; }
 
     /// <summary>
     /// The internal Milvus ID assigned to this ID.

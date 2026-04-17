@@ -26,6 +26,17 @@ internal static class Constants
     internal const string VarcharMaxLength = "max_length";
 
     /// <summary>
+    /// Type-param key that enables a tokenizer/analyzer on a VarChar field so it can be consumed
+    /// by a BM25 function. Value: "true"/"false".
+    /// </summary>
+    internal const string EnableAnalyzer = "enable_analyzer";
+
+    /// <summary>
+    /// Type-param key that carries the JSON-encoded analyzer configuration for a VarChar field.
+    /// </summary>
+    internal const string AnalyzerParams = "analyzer_params";
+
+    /// <summary>
     /// Top parameter key name.
     /// </summary>
     internal const string TopK = "topk";
