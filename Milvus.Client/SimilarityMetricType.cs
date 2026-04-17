@@ -148,5 +148,19 @@ public enum SimilarityMetricType
     /// <remarks>
     /// For more details, see <see href="https://milvus.io/docs/metric.md#Substructure" />.
     /// </remarks>
-    Substructure
+    Substructure,
+
+    /// <summary>
+    /// BM25 metric type for full-text search on sparse vector fields with a server-side BM25 function.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This metric type is used with sparse vector fields that have a BM25 function configured.
+    /// The index type should be <c>SPARSE_INVERTED_INDEX</c>.
+    /// </para>
+    /// <para>
+    /// For more details, see <see href="https://milvus.io/docs/full-text-search.md" />.
+    /// </para>
+    /// </remarks>
+    Bm25
 }
