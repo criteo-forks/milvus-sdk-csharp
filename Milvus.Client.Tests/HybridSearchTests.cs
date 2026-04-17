@@ -884,6 +884,82 @@ public class HybridSearchTests(
         Assert.Equal(new[] { "text_sparse" }, func.OutputFieldNames);
     }
 
+    // Ports pymilvus tests/prepare/test_search.py:TestHybridSearchRequest.test_hybrid_search_with_extra_params
+    // (shape-adapted: the pymilvus parametrisation exercises HybridSearchParameters-level keys —
+    // group_by_field, group_size, strict_group_size — which are typed HybridSearchParameters
+    // properties in C# and already have their own positive-path coverage in this file. This
+    // adaptation instead guards ExtraParameters wire-through on the TEXT (BM25) leg specifically,
+    // which is the interesting regression surface introduced by TextAnnSearchRequest.)
+    [Fact]
+    public async Task HybridSearch_with_BM25_leg_extra_parameters()
+    {
+        if (await Client.GetParsedMilvusVersion() < new Version(2, 5))
+        {
+            return;
+        }
+
+        MilvusCollection collection = Client.GetCollection(nameof(HybridSearch_with_BM25_leg_extra_parameters));
+        await collection.DropAsync();
+
+        var schema = new CollectionSchema
+        {
+            Fields =
+            {
+                FieldSchema.Create<long>("id", isPrimaryKey: true),
+                FieldSchema.CreateVarchar("text", maxLength: 512, enableAnalyzer: true),
+                FieldSchema.CreateSparseFloatVector("text_sparse"),
+                FieldSchema.CreateFloatVector("dense", 2),
+            },
+            Functions =
+            {
+                FunctionSchema.CreateBm25("text_bm25", inputFieldName: "text", outputFieldName: "text_sparse"),
+            }
+        };
+
+        await Client.CreateCollectionAsync(collection.Name, schema);
+        await collection.CreateIndexAsync("dense", IndexType.Flat, SimilarityMetricType.L2);
+        await collection.CreateIndexAsync(
+            "text_sparse", IndexType.SparseInvertedIndex, SimilarityMetricType.Bm25);
+
+        await collection.InsertAsync(
+        [
+            FieldData.Create("id", new[] { 1L, 2L }),
+            FieldData.Create("text", new[]
+            {
+                "white wireless headphones with active noise cancellation",
+                "black gaming headset with a loud microphone",
+            }),
+            FieldData.CreateFloatVector("dense", new ReadOnlyMemory<float>[]
+            {
+                new[] { 1f, 2f },
+                new[] { 1.1f, 2.1f },
+            })
+        ]);
+
+        await collection.LoadAsync();
+        await collection.WaitForCollectionLoadAsync(
+            waitingInterval: TimeSpan.FromMilliseconds(100), timeout: TimeSpan.FromMinutes(1));
+
+        // Text leg carries a BM25-specific extra parameter. Regression guard: the kvp must
+        // reach the wire, the server must accept it, and the response must still be well-formed.
+        var textLeg = new TextAnnSearchRequest("text_sparse", ["white headphones"], limit: 2)
+        {
+            ExtraParameters = { ["drop_ratio_search"] = "0.2" }
+        };
+        var denseLeg = new VectorAnnSearchRequest<float>(
+            "dense", [new[] { 1f, 2f }], SimilarityMetricType.L2, limit: 2);
+
+        var results = await collection.HybridSearchAsync(
+            [textLeg, denseLeg],
+            new RrfReranker(),
+            limit: 2,
+            new HybridSearchParameters { ConsistencyLevel = ConsistencyLevel.Strong });
+
+        Assert.Equal(collection.Name, results.CollectionName);
+        Assert.NotNull(results.Ids.LongIds);
+        Assert.Equal(2, results.Ids.LongIds.Count);
+    }
+
     [Fact]
     public void AnnSearchRequest_ExtraParameters()
     {
