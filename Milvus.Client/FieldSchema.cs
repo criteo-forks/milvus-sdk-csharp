@@ -112,8 +112,17 @@ public sealed class FieldSchema
     /// <param name="defaultValue">
     /// The default value for the field. Available since Milvus v2.5.
     /// </param>
-    /// <param name="enableAnalyzer">Enable a tokenizer/analyzer so the field can feed a BM25 function. Available since Milvus v2.5.</param>
-    /// <param name="analyzerParams">Optional JSON-encoded analyzer configuration. Available since Milvus v2.5.</param>
+    /// <param name="enableAnalyzer">
+    /// Enables a tokenizer/analyzer on this field so it can feed a BM25
+    /// <see cref="FunctionSchema"/>. Available since Milvus v2.5. See
+    /// <see href="https://milvus.io/docs/analyzer-overview.md"/>.
+    /// </param>
+    /// <param name="analyzerParams">
+    /// Optional JSON-encoded analyzer configuration (e.g. <c>{"tokenizer":"standard"}</c>)
+    /// applied when <paramref name="enableAnalyzer"/> is <c>true</c>. The value is passed
+    /// verbatim to the server — the SDK does not validate or reformat the JSON.
+    /// Available since Milvus v2.5.
+    /// </param>
     public static FieldSchema CreateVarchar(
         string name,
         int maxLength,

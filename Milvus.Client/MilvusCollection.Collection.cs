@@ -68,10 +68,37 @@ public partial class MilvusCollection
                     case Constants.VectorDim:
                         milvusField.Dimension = int.Parse(parameter.Value, CultureInfo.InvariantCulture);
                         break;
+
+                    case Constants.EnableAnalyzer:
+                        milvusField.EnableAnalyzer =
+                            bool.TryParse(parameter.Value, out bool enableAnalyzer) && enableAnalyzer;
+                        break;
+
+                    case Constants.AnalyzerParams:
+                        milvusField.AnalyzerParams = parameter.Value;
+                        break;
                 }
             }
 
             milvusCollectionSchema.Fields.Add(milvusField);
+        }
+
+        foreach (Grpc.FunctionSchema grpcFunction in response.Schema.Functions)
+        {
+            FunctionSchema milvusFunction = new(
+                grpcFunction.Id,
+                grpcFunction.Name,
+                (MilvusFunctionType)(int)grpcFunction.Type,
+                grpcFunction.InputFieldNames.ToList(),
+                grpcFunction.OutputFieldNames.ToList(),
+                string.IsNullOrEmpty(grpcFunction.Description) ? null : grpcFunction.Description);
+
+            foreach (Grpc.KeyValuePair kvp in grpcFunction.Params)
+            {
+                milvusFunction.Parameters[kvp.Key] = kvp.Value;
+            }
+
+            milvusCollectionSchema.Functions.Add(milvusFunction);
         }
 
         Dictionary<string, IList<int>> startPositions = response.StartPositions.ToDictionary(
