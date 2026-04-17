@@ -13,7 +13,7 @@ namespace Milvus.Client;
 /// <summary>
 /// Milvus gRPC client
 /// </summary>
-public sealed partial class MilvusClient : IDisposable
+public sealed partial class MilvusClient : IMilvusClient
 {
     private const int DefaultMilvusPort = 19530;
 
