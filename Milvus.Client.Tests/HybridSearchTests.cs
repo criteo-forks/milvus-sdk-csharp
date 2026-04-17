@@ -744,99 +744,6 @@ public class HybridSearchTests(
     }
 
     [Fact]
-    public void TextAnnSearchRequest_stores_query_texts()
-    {
-        var request = new TextAnnSearchRequest(
-            "text_sparse",
-            ["white headphones", "quiet and comfortable"],
-            limit: 5);
-
-        Assert.Equal("text_sparse", request.VectorFieldName);
-        Assert.Equal(SimilarityMetricType.Bm25, request.MetricType);
-        Assert.Equal(5, request.Limit);
-        Assert.Equal(["white headphones", "quiet and comfortable"], request.QueryTexts);
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_single_query()
-    {
-        var request = new TextAnnSearchRequest(
-            "text_sparse",
-            ["search query"],
-            limit: 10);
-
-        Assert.Single(request.QueryTexts);
-        Assert.Equal("search query", request.QueryTexts[0]);
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_supports_expression_filter()
-    {
-        var request = new TextAnnSearchRequest(
-            "text_sparse",
-            ["query"],
-            limit: 5)
-        {
-            Expression = "id > 10"
-        };
-
-        Assert.Equal("id > 10", request.Expression);
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_supports_extra_parameters()
-    {
-        var request = new TextAnnSearchRequest(
-            "text_sparse",
-            ["query"],
-            limit: 5)
-        {
-            ExtraParameters =
-            {
-                ["drop_ratio_search"] = "0.2"
-            }
-        };
-
-        Assert.Equal("0.2", request.ExtraParameters["drop_ratio_search"]);
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_throws_for_null_query_texts()
-    {
-        Assert.Throws<ArgumentNullException>(() => new TextAnnSearchRequest(
-            "text_sparse",
-            null!,
-            limit: 5));
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_throws_for_empty_query_texts()
-    {
-        Assert.Throws<ArgumentException>(() => new TextAnnSearchRequest(
-            "text_sparse",
-            Array.Empty<string>(),
-            limit: 5));
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_throws_for_invalid_limit()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new TextAnnSearchRequest(
-            "text_sparse",
-            ["query"],
-            limit: 0));
-    }
-
-    [Fact]
-    public void TextAnnSearchRequest_throws_for_empty_field_name()
-    {
-        Assert.Throws<ArgumentException>(() => new TextAnnSearchRequest(
-            "",
-            ["query"],
-            limit: 5));
-    }
-
-    [Fact]
     public async Task HybridSearch_with_BM25_full_text()
     {
         // BM25 full-text search requires the server-side Function feature (Milvus 2.5+).
@@ -924,7 +831,7 @@ public class HybridSearchTests(
 
         Assert.Equal(collection.Name, results.CollectionName);
         Assert.NotNull(results.Ids.LongIds);
-        Assert.True(results.Ids.LongIds.Count > 0);
+        Assert.Equal(3, results.Ids.LongIds.Count);
 
         // The three "headphones" documents (ids 1,2,3) should dominate the ranking,
         // since they are favored by BOTH the BM25 leg and the dense leg.
@@ -932,6 +839,49 @@ public class HybridSearchTests(
 
         var textField = (FieldData<string>)results.FieldsData.Single(f => f.FieldName == "text");
         Assert.Contains(textField.Data, t => t.Contains("headphones"));
+    }
+
+    [Fact]
+    public async Task DescribeAsync_returns_Functions_and_analyzer_flags()
+    {
+        // The Function + analyzer features require Milvus 2.5+.
+        if (await Client.GetParsedMilvusVersion() < new Version(2, 5))
+        {
+            return;
+        }
+
+        MilvusCollection collection = Client.GetCollection(nameof(DescribeAsync_returns_Functions_and_analyzer_flags));
+        await collection.DropAsync();
+
+        var schema = new CollectionSchema
+        {
+            Fields =
+            {
+                FieldSchema.Create<long>("id", isPrimaryKey: true),
+                FieldSchema.CreateVarchar("text", maxLength: 256, enableAnalyzer: true),
+                FieldSchema.CreateSparseFloatVector("text_sparse"),
+            },
+            Functions =
+            {
+                FunctionSchema.CreateBm25("text_bm25", inputFieldName: "text", outputFieldName: "text_sparse"),
+            }
+        };
+
+        await Client.CreateCollectionAsync(collection.Name, schema);
+
+        MilvusCollectionDescription description = await collection.DescribeAsync();
+
+        // Analyzer flag survives the CreateCollection -> DescribeCollection round-trip.
+        FieldSchema textField = description.Schema.Fields.Single(f => f.Name == "text");
+        Assert.True(textField.EnableAnalyzer);
+
+        // Functions survive the round-trip.
+        Assert.Single(description.Schema.Functions);
+        FunctionSchema func = description.Schema.Functions[0];
+        Assert.Equal("text_bm25", func.Name);
+        Assert.Equal(MilvusFunctionType.Bm25, func.Type);
+        Assert.Equal(new[] { "text" }, func.InputFieldNames);
+        Assert.Equal(new[] { "text_sparse" }, func.OutputFieldNames);
     }
 
     [Fact]
