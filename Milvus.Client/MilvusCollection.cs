@@ -6,7 +6,7 @@ namespace Milvus.Client;
 /// Represents a Milvus collection, and is the starting point for all operations involving one.
 /// </summary>
 #pragma warning disable CA1711
-public partial class MilvusCollection
+public partial class MilvusCollection : IMilvusCollection
 #pragma warning restore CA1711
 {
     private readonly MilvusClient _client;

@@ -16,6 +16,8 @@ public partial class MilvusClient
         return new MilvusCollection(this, collectionName);
     }
 
+    IMilvusCollection IMilvusClient.GetCollection(string collectionName) => GetCollection(collectionName);
+
     /// <summary>
     /// Creates a new collection.
     /// </summary>
@@ -191,6 +193,24 @@ public partial class MilvusClient
 
         return new MilvusCollection(this, collectionName);
     }
+
+    async Task<IMilvusCollection> IMilvusClient.CreateCollectionAsync(
+        string collectionName,
+        IReadOnlyList<FieldSchema> fields,
+        ConsistencyLevel consistencyLevel,
+        int shardsNum,
+        CancellationToken cancellationToken)
+        => await CreateCollectionAsync(collectionName, fields, consistencyLevel, shardsNum, cancellationToken)
+            .ConfigureAwait(false);
+
+    async Task<IMilvusCollection> IMilvusClient.CreateCollectionAsync(
+        string collectionName,
+        CollectionSchema schema,
+        ConsistencyLevel consistencyLevel,
+        int shardsNum,
+        CancellationToken cancellationToken)
+        => await CreateCollectionAsync(collectionName, schema, consistencyLevel, shardsNum, cancellationToken)
+            .ConfigureAwait(false);
 
     /// <summary>
     /// Checks whether a collection exists.
