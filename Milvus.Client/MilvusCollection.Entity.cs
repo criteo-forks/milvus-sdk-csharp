@@ -278,6 +278,32 @@ public partial class MilvusCollection
         HybridSearchParameters? parameters = null,
         CancellationToken cancellationToken = default)
     {
+        Grpc.HybridSearchRequest request = CreateHybridSearchRequest(requests, reranker, limit, parameters);
+
+        Grpc.SearchResults response =
+            await _client.InvokeAsync(_client.GrpcClient.HybridSearchAsync, request, static r => r.Status, cancellationToken)
+                .ConfigureAwait(false);
+
+        List<FieldData> fieldData = ProcessReturnedFieldData(response.Results.FieldsData);
+
+        return new SearchResults
+        {
+            CollectionName = response.CollectionName,
+            FieldsData = fieldData,
+            Ids = response.Results.Ids is null ? default : MilvusIds.FromGrpc(response.Results.Ids),
+            NumQueries = response.Results.NumQueries,
+            Scores = response.Results.Scores,
+            Limit = response.Results.TopK,
+            Limits = response.Results.Topks,
+        };
+    }
+
+    internal Grpc.HybridSearchRequest CreateHybridSearchRequest(
+        IReadOnlyList<AnnSearchRequest> requests,
+        IReranker reranker,
+        int limit,
+        HybridSearchParameters? parameters)
+    {
         Verify.NotNull(requests);
         Verify.NotNull(reranker);
 
@@ -367,6 +393,15 @@ public partial class MilvusCollection
                     Value = parameters.StrictGroupSize.Value.ToString()
                 });
             }
+
+            if (parameters.IgnoreGrowing is not null)
+            {
+                request.RankParams.Add(new Grpc.KeyValuePair
+                {
+                    Key = Constants.IgnoreGrowing,
+                    Value = parameters.IgnoreGrowing.Value.ToString()
+                });
+            }
         }
 
         if (parameters?.ConsistencyLevel is null)
@@ -381,8 +416,22 @@ public partial class MilvusCollection
                 Name, parameters.ConsistencyLevel.Value, parameters.GuaranteeTimestamp);
         }
 
+        return request;
+    }
+
+    private async Task<SearchResults> SearchInternalAsync(
+        string vectorFieldName,
+        Grpc.PlaceholderValue placeholderValue,
+        SimilarityMetricType metricType,
+        int limit,
+        SearchParameters? parameters,
+        CancellationToken cancellationToken)
+    {
+        Grpc.SearchRequest request = CreateSearchRequest(
+            vectorFieldName, placeholderValue, metricType, limit, parameters);
+
         Grpc.SearchResults response =
-            await _client.InvokeAsync(_client.GrpcClient.HybridSearchAsync, request, static r => r.Status, cancellationToken)
+            await _client.InvokeAsync(_client.GrpcClient.SearchAsync, request, static r => r.Status, cancellationToken)
                 .ConfigureAwait(false);
 
         List<FieldData> fieldData = ProcessReturnedFieldData(response.Results.FieldsData);
@@ -399,13 +448,12 @@ public partial class MilvusCollection
         };
     }
 
-    private async Task<SearchResults> SearchInternalAsync(
+    internal Grpc.SearchRequest CreateSearchRequest(
         string vectorFieldName,
         Grpc.PlaceholderValue placeholderValue,
         SimilarityMetricType metricType,
         int limit,
-        SearchParameters? parameters,
-        CancellationToken cancellationToken)
+        SearchParameters? parameters)
     {
         Grpc.SearchRequest request = new()
         {
@@ -527,22 +575,7 @@ public partial class MilvusCollection
                 }
             });
 
-        Grpc.SearchResults response =
-            await _client.InvokeAsync(_client.GrpcClient.SearchAsync, request, static r => r.Status, cancellationToken)
-                .ConfigureAwait(false);
-
-        List<FieldData> fieldData = ProcessReturnedFieldData(response.Results.FieldsData);
-
-        return new SearchResults
-        {
-            CollectionName = response.CollectionName,
-            FieldsData = fieldData,
-            Ids = response.Results.Ids is null ? default : MilvusIds.FromGrpc(response.Results.Ids),
-            NumQueries = response.Results.NumQueries,
-            Scores = response.Results.Scores,
-            Limit = response.Results.TopK,
-            Limits = response.Results.Topks,
-        };
+        return request;
     }
 
     private static Grpc.SearchRequest CreateSearchRequestFromAnnSearchRequest(AnnSearchRequest annRequest, string collectionName)
@@ -582,6 +615,15 @@ public partial class MilvusCollection
         if (annRequest.Expression is not null)
         {
             request.Dsl = annRequest.Expression;
+        }
+
+        if (annRequest.IgnoreGrowing is not null)
+        {
+            request.SearchParams.Add(new Grpc.KeyValuePair
+            {
+                Key = Constants.IgnoreGrowing,
+                Value = annRequest.IgnoreGrowing.Value.ToString()
+            });
         }
 
         request.SearchParams.AddRange(new[]

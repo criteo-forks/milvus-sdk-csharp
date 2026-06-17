@@ -45,6 +45,12 @@ public abstract class AnnSearchRequest
     /// Additional search parameters specific to the index type.
     /// </summary>
     public IDictionary<string, string> ExtraParameters { get; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Whether to ignore growing segments during this ANN search. Defaults to <c>false</c>, indicating that searches
+    /// involve growing segments.
+    /// </summary>
+    public bool? IgnoreGrowing { get; set; }
 }
 
 /// <summary>

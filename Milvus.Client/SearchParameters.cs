@@ -80,7 +80,7 @@ public class SearchParameters
     /// Whether to ignore growing segments during similarity searches. Defaults to <c>false</c>, indicating that
     /// searches involve growing segments.
     /// </summary>
-    public bool? IgnoreGrowing { get; private set; }
+    public bool? IgnoreGrowing { get; set; }
 
     /// <summary>
     /// Group search results by the specified field.

@@ -35,4 +35,7 @@ public class HybridSearchParameters
 
     /// <inheritdoc cref="SearchParameters.StrictGroupSize"/>
     public bool? StrictGroupSize { get; set; }
+
+    /// <inheritdoc cref="SearchParameters.IgnoreGrowing"/>
+    public bool? IgnoreGrowing { get; set; }
 }
