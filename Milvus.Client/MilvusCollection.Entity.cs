@@ -284,18 +284,7 @@ public partial class MilvusCollection
             await _client.InvokeAsync(_client.GrpcClient.HybridSearchAsync, request, static r => r.Status, cancellationToken)
                 .ConfigureAwait(false);
 
-        List<FieldData> fieldData = ProcessReturnedFieldData(response.Results.FieldsData);
-
-        return new SearchResults
-        {
-            CollectionName = response.CollectionName,
-            FieldsData = fieldData,
-            Ids = response.Results.Ids is null ? default : MilvusIds.FromGrpc(response.Results.Ids),
-            NumQueries = response.Results.NumQueries,
-            Scores = response.Results.Scores,
-            Limit = response.Results.TopK,
-            Limits = response.Results.Topks,
-        };
+        return FromGrpcSearchResults(response);
     }
 
     internal Grpc.HybridSearchRequest CreateHybridSearchRequest(
@@ -434,18 +423,7 @@ public partial class MilvusCollection
             await _client.InvokeAsync(_client.GrpcClient.SearchAsync, request, static r => r.Status, cancellationToken)
                 .ConfigureAwait(false);
 
-        List<FieldData> fieldData = ProcessReturnedFieldData(response.Results.FieldsData);
-
-        return new SearchResults
-        {
-            CollectionName = response.CollectionName,
-            FieldsData = fieldData,
-            Ids = response.Results.Ids is null ? default : MilvusIds.FromGrpc(response.Results.Ids),
-            NumQueries = response.Results.NumQueries,
-            Scores = response.Results.Scores,
-            Limit = response.Results.TopK,
-            Limits = response.Results.Topks,
-        };
+        return FromGrpcSearchResults(response);
     }
 
     internal Grpc.SearchRequest CreateSearchRequest(
@@ -803,7 +781,7 @@ public partial class MilvusCollection
                 cancellationToken)
                 .ConfigureAwait(false);
 
-        return ProcessReturnedFieldData(response.FieldsData);
+        return FromGrpcQueryResults(response);
     }
 
     /// <summary>
@@ -916,7 +894,7 @@ public partial class MilvusCollection
                 // Filter out extra field if user didn't request it
                 response.FieldsData.Remove(pkFieldsData);
             }
-            yield return ProcessReturnedFieldData(response.FieldsData);
+            yield return ProcessReturnedFieldData(response.FieldsData, processedDuringIterationCount);
 
             processedItemsCount += processedDuringIterationCount;
             int leftItemsCount = userLimit - processedItemsCount;
@@ -995,15 +973,88 @@ public partial class MilvusCollection
         }
     }
 
-    private static List<FieldData> ProcessReturnedFieldData(RepeatedField<Grpc.FieldData> grpcFields)
+    internal static SearchResults FromGrpcSearchResults(Grpc.SearchResults response)
+    {
+        Verify.NotNull(response);
+
+        Grpc.SearchResultData grpcResults = response.Results;
+        int rowCount = grpcResults.Scores.Count;
+
+        int idCount = grpcResults.Ids?.IdFieldCase switch
+        {
+            Grpc.IDs.IdFieldOneofCase.IntId => grpcResults.Ids.IntId.Data.Count,
+            Grpc.IDs.IdFieldOneofCase.StrId => grpcResults.Ids.StrId.Data.Count,
+            _ => 0
+        };
+
+        if (idCount != rowCount)
+        {
+            throw new MilvusException(
+                $"Search results contain {rowCount} scores but {idCount} IDs.");
+        }
+
+        if (grpcResults.Topks.Count > 0)
+        {
+            long topksRowCount = grpcResults.Topks.Sum();
+            if (topksRowCount != rowCount)
+            {
+                throw new MilvusException(
+                    $"Search results contain {rowCount} rows but topks describe {topksRowCount} rows.");
+            }
+        }
+
+        return new SearchResults
+        {
+            CollectionName = response.CollectionName,
+            FieldsData = ProcessReturnedFieldData(
+                grpcResults.FieldsData,
+                rowCount),
+            Ids = grpcResults.Ids is null ? default : MilvusIds.FromGrpc(grpcResults.Ids),
+            NumQueries = grpcResults.NumQueries,
+            Scores = grpcResults.Scores,
+            Limit = grpcResults.TopK,
+            Limits = grpcResults.Topks,
+        };
+    }
+
+    internal static IReadOnlyList<FieldData> FromGrpcQueryResults(Grpc.QueryResults response)
+    {
+        Verify.NotNull(response);
+
+        if (response.FieldsData.Count > 0
+            && response.FieldsData.All(f => f.FieldCase == Grpc.FieldData.FieldOneofCase.None))
+        {
+            return Array.Empty<FieldData>();
+        }
+
+        return ProcessReturnedFieldData(response.FieldsData);
+    }
+
+    private static List<FieldData> ProcessReturnedFieldData(
+        RepeatedField<Grpc.FieldData> grpcFields,
+        long? expectedRowCount = null)
     {
         int fieldCount = grpcFields.Count;
         List<FieldData> results = new List<FieldData>(fieldCount);
+        long? validatedRowCount = expectedRowCount;
+        bool hasDataLessFields = false;
 
         Grpc.FieldData? metaFieldData = null;
 
         foreach (Grpc.FieldData grpcField in grpcFields)
         {
+            if (grpcField.FieldCase == Grpc.FieldData.FieldOneofCase.None)
+            {
+                if (expectedRowCount != 0)
+                {
+                    throw new NotSupportedException(
+                        $"Cannot convert data-less {grpcField.Type} field '{grpcField.FieldName}' to FieldData");
+                }
+
+                hasDataLessFields = true;
+                continue;
+            }
+
             if (grpcField.IsDynamic)
             {
                 if (metaFieldData is not null)
@@ -1015,13 +1066,15 @@ public partial class MilvusCollection
             }
             else
             {
-                results.Add(FieldData.FromGrpcFieldData(grpcField));
+                FieldData field = FieldData.FromGrpcFieldData(grpcField);
+                ValidateReturnedFieldRowCount(field.FieldName, field.RowCount, ref validatedRowCount);
+                results.Add(field);
             }
         }
 
         if (metaFieldData is null)
         {
-            return results;
+            return hasDataLessFields ? new List<FieldData>() : results;
         }
 
         // Dynamic data is present, parse out the fields from the JSON
@@ -1033,6 +1086,7 @@ public partial class MilvusCollection
         }
 
         RepeatedField<ByteString> rawJsonValues = metaFieldData.Scalars.JsonData.Data;
+        ValidateReturnedFieldRowCount(metaFieldData.FieldName, rawJsonValues.Count, ref validatedRowCount);
 
         Dictionary<string, Array> dynamicFields = new();
 
@@ -1124,7 +1178,26 @@ public partial class MilvusCollection
             });
         }
 
-        return results;
+        return hasDataLessFields ? new List<FieldData>() : results;
+    }
+
+    private static void ValidateReturnedFieldRowCount(
+        string? fieldName,
+        long actualRowCount,
+        ref long? expectedRowCount)
+    {
+        if (expectedRowCount is null)
+        {
+            expectedRowCount = actualRowCount;
+            return;
+        }
+
+        if (actualRowCount != expectedRowCount.Value)
+        {
+            throw new MilvusException(
+                $"Field '{fieldName}' contains {actualRowCount} rows, but the result contains " +
+                $"{expectedRowCount.Value} rows.");
+        }
     }
 
     ulong CalculateGuaranteeTimestamp(
