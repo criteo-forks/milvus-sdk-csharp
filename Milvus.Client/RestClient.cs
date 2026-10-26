@@ -69,7 +69,7 @@ internal sealed class RestClient(HttpClient httpClient, string? database, DateTi
                     parameters?.IgnoreGrowing, parameters?.GracefulTime);
                 WriteConsistency(writer, parameters?.ConsistencyLevel ?? description.ConsistencyLevel);
             },
-            (root, description) => RestResultReader.ReadSearch(root, description, numQueries,
+            (root, description) => RestResultReader.ReadSearch(root, description, collection.Name, numQueries,
                 parameters?.OutputFieldsInternal), cancellationToken);
     }
 
@@ -124,24 +124,35 @@ internal sealed class RestClient(HttpClient httpClient, string? database, DateTi
                 }
                 writer.WriteEndObject();
             },
-            (root, description) => RestResultReader.ReadSearch(root, description, numQueries,
+            (root, description) => RestResultReader.ReadSearch(root, description, collection.Name, numQueries,
                 parameters?.OutputFieldsInternal, hybridLimit: limit), cancellationToken);
     }
 
     internal Task<IReadOnlyList<FieldData>> QueryAsync(MilvusCollection collection, string expression,
         QueryParameters? parameters, CancellationToken cancellationToken)
-        => ExecuteAsync(collection, "query", parameters?.ConsistencyLevel,
+    {
+        if (parameters?.Limit is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(parameters), "Query limit must be positive when specified.");
+        if (parameters?.Limit is not null && parameters.Offset is < 0)
+            throw new ArgumentOutOfRangeException(nameof(parameters), "Query offset cannot be negative.");
+        if (parameters?.Limit is not null && parameters.OutputFieldsInternal is { Count: 1 } outputs
+            && string.Equals(outputs[0].Trim(), "count(*)", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Count queries do not support a limit.", nameof(parameters));
+        return ExecuteAsync(collection, "query", parameters?.ConsistencyLevel,
             parameters?.GuaranteeTimestamp, parameters?.TimeTravelTimestamp,
             (writer, description) =>
             {
-                WriteCommon(writer, collection.Name, parameters?.PartitionNamesInternal, parameters?.OutputFieldsInternal);
+                // REST otherwise defaults to all fields and a 100-row limit, unlike gRPC.
+                WriteCommon(writer, collection.Name, parameters?.PartitionNamesInternal,
+                    parameters?.OutputFieldsInternal ?? (IReadOnlyList<string>)Array.Empty<string>());
                 writer.WriteString("filter", expression);
-                if (parameters?.Limit is { } limit) writer.WriteNumber("limit", limit);
+                writer.WriteNumber("limit", parameters?.Limit ?? 0);
                 if (parameters?.Offset is { } offset) writer.WriteNumber("offset", offset);
                 WriteConsistency(writer, parameters?.ConsistencyLevel ?? description.ConsistencyLevel);
             },
             (root, description) => RestResultReader.ReadFields(root.GetProperty("data"), description,
                 searchOutputFields: null, isSearch: false), cancellationToken);
+    }
 
     private async Task<T> ExecuteAsync<T>(MilvusCollection collection, string operation,
         ConsistencyLevel? consistency, ulong? guaranteeTimestamp, ulong? travelTimestamp,

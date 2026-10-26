@@ -7,7 +7,7 @@ namespace Milvus.Client;
 internal static class RestResultReader
 {
     internal static SearchResults ReadSearch(JsonElement root, MilvusCollectionDescription description,
-        int numQueries, IReadOnlyList<string>? outputFields, int? hybridLimit = null)
+        string collectionName, int numQueries, IReadOnlyList<string>? outputFields, int? hybridLimit = null)
     {
         JsonElement rows = root.GetProperty("data");
         int count = rows.GetArrayLength();
@@ -23,7 +23,7 @@ internal static class RestResultReader
             : MilvusIds.FromIds(rows.EnumerateArray().Select(row => row.GetProperty(primaryKey.Name).GetString()!).ToArray());
         return new SearchResults
         {
-            CollectionName = description.CollectionName,
+            CollectionName = collectionName,
             NumQueries = numQueries,
             // The ordinary Milvus reducer exposes the last query's actual hit count as TopK.
             Limit = hybridLimit ?? limits.LastOrDefault(),
@@ -99,11 +99,19 @@ internal static class RestResultReader
             JsonValueKind.String => FieldData.CreateVarChar(name,
                 values.Select(value => IsNull(value) ? null : value.GetString()).ToArray(), isDynamic: true),
             JsonValueKind.Number => FieldData.Create(name,
-                values.Select(value => IsNull(value) ? 0 : ReadInt64(value)).ToArray(), isDynamic: true),
+                values.Select(value => IsNull(value) ? 0 : ReadDynamicInt64(value)).ToArray(), isDynamic: true),
             JsonValueKind.True or JsonValueKind.False => FieldData.Create(name,
                 values.Select(value => !IsNull(value) && value.GetBoolean()).ToArray(), isDynamic: true),
             _ => throw new NotSupportedException($"REST dynamic field '{name}' has an unsupported type.")
         };
+    }
+
+    private static long ReadDynamicInt64(JsonElement value)
+    {
+        // Milvus converts dynamic numbers to float64; a neighboring integer can round onto the boundary.
+        if (!value.TryGetInt64(out long number) || number <= -9007199254740992L || number >= 9007199254740992L)
+            throw new NotSupportedException("REST cannot preserve dynamic integers at or outside ±2^53; use gRPC.");
+        return number;
     }
 
     private static FieldData ReadArrayField(FieldSchema schema, JsonElement[] values) => schema.ElementDataType switch
@@ -124,12 +132,12 @@ internal static class RestResultReader
         return new ArrayFieldData<T>(name, arrays, isDynamic: false);
     }
 
-    private static IEnumerable<JsonElement> ArrayValues(JsonElement value, string member)
+    private static JsonElement.ArrayEnumerator ArrayValues(JsonElement value, string member)
     {
         if (value.ValueKind == JsonValueKind.Array) return value.EnumerateArray();
         // Milvus 2.6 also emits arrays as Go's ScalarField oneof wrapper.
         if (value.TryGetProperty("Data", out JsonElement union)) value = union;
-        if (IsNull(value)) return [];
+        if (IsNull(value)) return default;
         string camelMember = char.ToLowerInvariant(member[0]) + member.Substring(1);
         if (value.TryGetProperty(member, out JsonElement field) || value.TryGetProperty(camelMember, out field))
             value = field;

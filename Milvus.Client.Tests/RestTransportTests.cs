@@ -145,6 +145,7 @@ public sealed class RestTransportTests
         yield return [FieldSchema.CreateSparseFloatVector("value"), FieldData.CreateSparseFloatVector("value", [new(new[] { 1 }, new[] { 1f }), new(new[] { 2 }, new[] { 2f })]), """[{"1":1},{"2":2}]"""];
         yield return [FieldSchema.CreateArray<bool>("value", 10), FieldData.CreateArray("value", new[] { new[] { true }, Array.Empty<bool>() }), "[[true],[]]"];
         yield return [FieldSchema.CreateArray<int>("value", 10), FieldData.CreateArray("value", new[] { new[] { 1 }, new[] { 2 } }), """[{"Data":{"IntData":{"data":[1]}}},{"Data":{"IntData":{"data":[2]}}}]"""];
+        yield return [FieldSchema.CreateArray<int>("value", 10), FieldData.CreateArray("value", new[] { Array.Empty<int>(), new[] { 2 } }), """[{"Data":null},{"Data":{"IntData":{"data":[2]}}}]"""];
         yield return [FieldSchema.CreateArray<long>("value", 10), FieldData.CreateArray("value", new[] { new[] { 1L }, Array.Empty<long>() }), "[[1],[]]"];
         yield return [FieldSchema.CreateArray<float>("value", 10), FieldData.CreateArray("value", new[] { new[] { 1f }, Array.Empty<float>() }), "[[1],[]]"];
         yield return [FieldSchema.CreateArray<double>("value", 10), FieldData.CreateArray("value", new[] { new[] { 1.0 }, Array.Empty<double>() }), "[[1],[]]"];
@@ -521,16 +522,111 @@ public sealed class RestTransportTests
         Assert.Throws<ArgumentException>(() => new MilvusClient(server.Channel, "test_db", default, null, http));
     }
 
-    [Fact]
-    public async Task Query_without_output_fields_matches_the_GRPC_primary_key_default()
+    [Theory]
+    [InlineData("null")]
+    [InlineData("untouched")]
+    [InlineData("accessed")]
+    public async Task Query_without_output_fields_matches_the_GRPC_primary_key_default(string optionState)
     {
         using var server = new ReadServer();
         using MilvusClient grpc = server.CreateClient(rest: false);
         using MilvusClient rest = server.CreateClient(rest: true);
-        IReadOnlyList<FieldData> expected = await grpc.GetCollection("items").QueryAsync("key > 0");
-        IReadOnlyList<FieldData> actual = await rest.GetCollection("items").QueryAsync("key > 0");
+        QueryParameters? options = optionState == "null" ? null : new QueryParameters();
+        if (optionState == "accessed") Assert.Empty(options!.OutputFields);
+        IReadOnlyList<FieldData> expected = await grpc.GetCollection("items").QueryAsync("key > 0", options);
+        IReadOnlyList<FieldData> actual = await rest.GetCollection("items").QueryAsync("key > 0", options);
+        using JsonDocument body = JsonDocument.Parse(Assert.Single(server.RestRequests).Body);
+        Assert.Empty(body.RootElement.GetProperty("outputFields").EnumerateArray());
         Assert.Equal("key", Assert.Single(actual).FieldName);
         AssertFieldsEqual(expected, actual);
+    }
+
+    [Theory]
+    [InlineData(null, 101)]
+    [InlineData(21, 21)]
+    public async Task Query_limit_matches_GRPC_beyond_the_REST_default(int? limit, int expectedRows)
+    {
+        string values = JsonSerializer.Serialize(Enumerable.Range(0, 101));
+        using var server = new ReadServer(FieldSchema.Create<int>("value"),
+            FieldData.Create("value", Enumerable.Range(0, 101).ToArray()), valuesJson: values);
+        using MilvusClient grpc = server.CreateClient(rest: false);
+        using MilvusClient rest = server.CreateClient(rest: true);
+        var options = new QueryParameters { Limit = limit, OutputFields = { "key" } };
+        IReadOnlyList<FieldData> expected = await grpc.GetCollection("items").QueryAsync("key > 0", options);
+        IReadOnlyList<FieldData> actual = await rest.GetCollection("items").QueryAsync("key > 0", options);
+        Assert.Equal(expectedRows, Assert.Single(actual).RowCount);
+        AssertFieldsEqual(expected, actual);
+        using JsonDocument body = JsonDocument.Parse(Assert.Single(server.RestRequests).Body);
+        Assert.Equal(limit ?? 0, body.RootElement.GetProperty("limit").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(-1, 0, false)]
+    [InlineData(1, -1, false)]
+    [InlineData(1, 0, true)]
+    public async Task REST_rejects_query_options_the_endpoint_would_silently_ignore(int limit, int offset, bool count)
+    {
+        using var server = new ReadServer();
+        using MilvusClient client = server.CreateClient(rest: true);
+        var options = new QueryParameters { Limit = limit, Offset = offset };
+        if (count) options.OutputFields.Add(" count(*) ");
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => client.GetCollection("items").QueryAsync("key > 0", options));
+        Assert.Empty(server.RestRequests);
+    }
+
+    [Theory]
+    [InlineData("dense")]
+    [InlineData("sparse")]
+    [InlineData("hybrid")]
+    public async Task Alias_search_returns_the_requested_name_on_both_transports(string operation)
+    {
+        using var server = new ReadServer();
+        using MilvusClient grpc = server.CreateClient(rest: false);
+        using MilvusClient rest = server.CreateClient(rest: true);
+        SearchResults expected = await Search(grpc.GetCollection("items_live"), operation);
+        SearchResults actual = await Search(rest.GetCollection("items_live"), operation);
+        Assert.Equal("items_live", actual.CollectionName);
+        AssertSearchEqual(expected, actual);
+    }
+
+    [Theory]
+    [InlineData(9007199254740991L)]
+    [InlineData(-9007199254740991L)]
+    [InlineData(9007199254740992L)]
+    [InlineData(-9007199254740992L)]
+    [InlineData(9007199254740993L)]
+    [InlineData(-9007199254740993L)]
+    [InlineData(9007199254740994L)]
+    [InlineData(-9007199254740994L)]
+    [InlineData(long.MinValue)]
+    [InlineData(long.MaxValue)]
+    public async Task Dynamic_integer_precision_loss_fails_explicitly(long value)
+    {
+        using var server = new ReadServer(schema: null,
+            field: FieldData.CreateJson("$meta", new[] { JsonSerializer.Serialize(new { value }), JsonSerializer.Serialize(new { value }) }, isDynamic: true),
+            valuesJson: JsonSerializer.Serialize(new[] { value, value }));
+        using MilvusClient grpc = server.CreateClient(rest: false);
+        using MilvusClient rest = server.CreateClient(rest: true);
+        foreach (string operation in new[] { "dense", "sparse", "hybrid", "query" })
+        {
+            if (value > -9007199254740992L && value < 9007199254740992L)
+            {
+                if (operation == "query") AssertFieldsEqual(await Query(grpc.GetCollection("items")), await Query(rest.GetCollection("items")));
+                else AssertSearchEqual(await Search(grpc.GetCollection("items"), operation), await Search(rest.GetCollection("items"), operation));
+            }
+            else
+            {
+                IReadOnlyList<FieldData> fields = operation == "query"
+                    ? await Query(grpc.GetCollection("items"))
+                    : (await Search(grpc.GetCollection("items"), operation)).FieldsData;
+                Assert.Equal(value, ((FieldData<long>)Assert.Single(fields, field => field.FieldName == "value")).Data[0]);
+                NotSupportedException error = operation == "query"
+                    ? await Assert.ThrowsAsync<NotSupportedException>(() => Query(rest.GetCollection("items")))
+                    : await Assert.ThrowsAsync<NotSupportedException>(() => Search(rest.GetCollection("items"), operation));
+                Assert.Contains("use gRPC", error.Message);
+            }
+        }
     }
 
     private static async Task ReadAll(MilvusCollection collection)
@@ -639,9 +735,9 @@ public sealed class RestTransportTests
             IMessage response = method switch
             {
                 "DescribeCollection" => Describe(),
-                "Search" => SearchResponse(Grpc.SearchRequest.Parser.ParseFrom(payload).OutputFields),
+                "Search" => SearchResponse(Grpc.SearchRequest.Parser.ParseFrom(payload)),
                 "HybridSearch" => HybridResponse(Grpc.HybridSearchRequest.Parser.ParseFrom(payload)),
-                "Query" => QueryResponse(Grpc.QueryRequest.Parser.ParseFrom(payload).OutputFields),
+                "Query" => QueryResponse(Grpc.QueryRequest.Parser.ParseFrom(payload)),
                 "GetVersion" => new Grpc.GetVersionResponse { Status = new(), Version = "test-version" },
                 _ => new Grpc.Status()
             };
@@ -680,18 +776,22 @@ public sealed class RestTransportTests
             return response;
         }
 
-        private IEnumerable<Grpc.FieldData> Fields(IReadOnlyCollection<string> outputs)
+        private IEnumerable<Grpc.FieldData> Fields(IReadOnlyCollection<string> outputs, int? limit = null)
         {
             if (Empty) yield break;
             if (outputs.Contains("key") || outputs.Contains("*"))
                 yield return _stringIds ? FieldData.CreateVarChar("key", ["first", "second"]).ToGrpcFieldData()
-                    : FieldData.Create("key", new[] { 9007199254740993L, 9007199254740995L }).ToGrpcFieldData();
+                    : FieldData.Create("key", Enumerable.Range(0, Math.Min(_values.Length, limit ?? _values.Length))
+                        .Select(index => 9007199254740993L + index * 2).ToArray()).ToGrpcFieldData();
             if (outputs.Contains("value") || outputs.Contains("*")) yield return _valueField.ToGrpcFieldData();
         }
 
-        private Grpc.SearchResults SearchResponse(IReadOnlyCollection<string> outputs)
+        private Grpc.SearchResults SearchResponse(Grpc.SearchRequest request)
+            => SearchResponse(request.OutputFields, request.CollectionName);
+
+        private Grpc.SearchResults SearchResponse(IReadOnlyCollection<string> outputs, string collectionName)
         {
-            var response = new Grpc.SearchResults { Status = new(), CollectionName = "items",
+            var response = new Grpc.SearchResults { Status = new(), CollectionName = collectionName,
                 Results = new() { NumQueries = Limits.Length, TopK = Empty ? 0 : Limits.Last(), Ids = new() } };
             response.Results.Topks.AddRange(Limits);
             if (!Empty)
@@ -706,18 +806,21 @@ public sealed class RestTransportTests
 
         private Grpc.SearchResults HybridResponse(Grpc.HybridSearchRequest request)
         {
-            Grpc.SearchResults response = SearchResponse(request.OutputFields);
+            Grpc.SearchResults response = SearchResponse(request.OutputFields, request.CollectionName);
             response.Results.TopK = long.Parse(request.RankParams.Single(pair => pair.Key == "limit").Value,
                 System.Globalization.CultureInfo.InvariantCulture);
             return response;
         }
 
-        private Grpc.QueryResults QueryResponse(IReadOnlyCollection<string> outputs)
+        private Grpc.QueryResults QueryResponse(Grpc.QueryRequest request)
         {
+            IReadOnlyCollection<string> outputs = request.OutputFields;
+            string? limit = request.QueryParams.FirstOrDefault(pair => pair.Key == "limit")?.Value;
             var response = new Grpc.QueryResults { Status = new() };
             if (outputs.Contains("count(*)"))
                 response.FieldsData.Add(FieldData.Create("count(*)", new[] { 2L }).ToGrpcFieldData());
-            else response.FieldsData.AddRange(Fields(outputs.Count == 0 ? new[] { "key" } : outputs));
+            else response.FieldsData.AddRange(Fields(outputs.Count == 0 ? new[] { "key" } : outputs,
+                limit is null ? null : int.Parse(limit, System.Globalization.CultureInfo.InvariantCulture)));
             return response;
         }
 
@@ -733,17 +836,23 @@ public sealed class RestTransportTests
             if (RestError == "application") return JsonResponse(new { code = 100, message = "collection missing" });
             using JsonDocument json = JsonDocument.Parse(body);
             string[] outputs = json.RootElement.TryGetProperty("outputFields", out JsonElement fields)
-                ? fields.EnumerateArray().Select(field => field.GetString()!).ToArray() : [];
+                ? fields.EnumerateArray().Select(field => field.GetString()!).ToArray() : operation == "query" ? ["*"] : [];
             if (outputs.Contains("count(*)")) return JsonResponse(new { code = 0, data = new[] { new Dictionary<string, long> { ["count(*)"] = 2 } } });
             var rows = new List<Dictionary<string, object?>>();
             if (!Empty)
             {
-                for (int i = 0; i < _values.Length; i++)
+                int limit = operation == "query"
+                    ? json.RootElement.TryGetProperty("limit", out JsonElement queryLimit) ? queryLimit.GetInt32() : 100
+                    : 0;
+                int rowCount = limit > 0 ? Math.Min(limit, _values.Length) : _values.Length;
+                for (int i = 0; i < rowCount; i++)
                 {
                     var row = new Dictionary<string, object?>();
                     if (operation != "query" || outputs.Length == 0 || outputs.Contains("key") || outputs.Contains("*"))
                         row["key"] = _stringIds ? (i == 0 ? "first" : "second") : 9007199254740993L + i * 2;
-                    if (outputs.Contains("value") || outputs.Contains("*")) row["value"] = _values[i];
+                    if (outputs.Contains("value") || outputs.Contains("*"))
+                        row["value"] = _valueSchema is null && _values[i].ValueKind == JsonValueKind.Number
+                            ? (object)_values[i].GetDouble() : _values[i];
                     if (operation != "query") row["distance"] = i == 0 ? 0.25f : 0.5f;
                     rows.Add(row);
                 }

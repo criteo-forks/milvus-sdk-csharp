@@ -61,6 +61,10 @@ REST has protocol limitations. The implementation was checked against Milvus
 - Explicit guarantee/time-travel timestamps, requested score rounding other than
   -1, grouped search, and global hybrid IgnoreGrowing are rejected. Per-leg
   IgnoreGrowing is supported for hybrid search.
+- Dynamic numeric output at or outside ±2^53 is rejected: the checked server
+  converts dynamic JSON numbers through float64 and can round large integers
+  before transmission. Use gRPC for these values. Typed Int64 fields and primary
+  keys retain their full precision.
 - REST search reserves distance as a response field; collections containing
   that field name are rejected for REST searches.
 - Per-query counts must be present for multi-query results, including empty
