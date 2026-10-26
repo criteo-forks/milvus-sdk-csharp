@@ -346,6 +346,7 @@ public sealed partial class MilvusClient : IDisposable
     /// </summary>
     public void Dispose()
     {
+        RestClient?.Dispose();
         if (_ownsGrpcChannel)
         {
             _grpcChannel.Dispose();

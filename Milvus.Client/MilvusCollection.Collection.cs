@@ -15,7 +15,9 @@ public partial class MilvusCollection
     /// <returns>A description of the collection.</returns>
     public async Task<MilvusCollectionDescription> DescribeAsync(CancellationToken cancellationToken = default)
     {
-        var request = new DescribeCollectionRequest { CollectionName = Name };
+        string collectionName = Name;
+        int metadataVersion = _client.RestClient?.MetadataVersion ?? 0;
+        var request = new DescribeCollectionRequest { CollectionName = collectionName };
 
         DescribeCollectionResponse response =
             await _client.InvokeAsync(_client.GrpcClient.DescribeCollectionAsync, request, r => r.Status,
@@ -105,7 +107,7 @@ public partial class MilvusCollection
             kdp => kdp.Key,
             kdp => (IList<int>)kdp.Data.Select(static p => (int)p).ToList());
 
-        return new MilvusCollectionDescription(
+        var description = new MilvusCollectionDescription(
             response.Aliases,
             response.CollectionName,
             response.CollectionID,
@@ -114,6 +116,8 @@ public partial class MilvusCollection
             milvusCollectionSchema,
             response.ShardsNum,
             startPositions);
+        _client.RestClient?.RememberMetadata(collectionName, description, metadataVersion);
+        return description;
     }
 
     /// <summary>
@@ -132,6 +136,7 @@ public partial class MilvusCollection
         await _client.InvokeAsync(_client.GrpcClient.RenameCollectionAsync, request, cancellationToken)
             .ConfigureAwait(false);
 
+        _client.RestClient?.InvalidateMetadata();
         Name = newName;
     }
 
@@ -147,6 +152,7 @@ public partial class MilvusCollection
 
         await _client.InvokeAsync(_client.GrpcClient.DropCollectionAsync, request, cancellationToken)
             .ConfigureAwait(false);
+        _client.RestClient?.InvalidateMetadata();
     }
 
     /// <summary>

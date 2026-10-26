@@ -23,6 +23,9 @@ public readonly struct MilvusIds : IEquatable<MilvusIds>
     /// </summary>
     public IReadOnlyList<string>? StringIds { get; }
 
+    internal static MilvusIds FromIds(IReadOnlyList<long> ids) => new(ids);
+    internal static MilvusIds FromIds(IReadOnlyList<string> ids) => new(ids);
+
     internal static MilvusIds FromGrpc(Grpc.IDs grpcIds)
         => grpcIds.IdFieldCase switch
         {

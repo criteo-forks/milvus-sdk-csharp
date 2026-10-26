@@ -188,6 +188,7 @@ public partial class MilvusClient
         };
 
         await InvokeAsync(GrpcClient.CreateCollectionAsync, request, cancellationToken).ConfigureAwait(false);
+        RestClient?.InvalidateMetadata();
 
         return new MilvusCollection(this, collectionName);
     }

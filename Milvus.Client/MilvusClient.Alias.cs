@@ -22,6 +22,7 @@ public partial class MilvusClient
 
         await InvokeAsync(GrpcClient.CreateAliasAsync, request, cancellationToken)
             .ConfigureAwait(false);
+        RestClient?.InvalidateMetadata();
     }
 
     /// <summary>
@@ -38,6 +39,7 @@ public partial class MilvusClient
         var request = new DropAliasRequest { Alias = alias };
 
         await InvokeAsync(GrpcClient.DropAliasAsync, request, cancellationToken).ConfigureAwait(false);
+        RestClient?.InvalidateMetadata();
     }
 
     /// <summary>
@@ -60,6 +62,7 @@ public partial class MilvusClient
 
         await InvokeAsync(GrpcClient.AlterAliasAsync, request, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
+        RestClient?.InvalidateMetadata();
     }
 
     /// <summary>

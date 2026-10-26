@@ -190,6 +190,12 @@ public partial class MilvusCollection
         Verify.NotNullOrWhiteSpace(vectorFieldName);
         Verify.NotNull(vectors);
 
+        if (_client.RestClient is { } rest)
+        {
+            return await rest.SearchAsync(this, vectorFieldName, vectors, metricType, limit,
+                parameters, cancellationToken).ConfigureAwait(false);
+        }
+
         Grpc.PlaceholderValue placeholderValue = new() { Tag = Constants.VectorTag };
 
         switch (vectors)
@@ -243,6 +249,12 @@ public partial class MilvusCollection
         Verify.NotNullOrWhiteSpace(vectorFieldName);
         Verify.NotNull(vectors);
 
+        if (_client.RestClient is { } rest)
+        {
+            return await rest.SearchAsync(this, vectorFieldName, vectors, metricType, limit,
+                parameters, cancellationToken).ConfigureAwait(false);
+        }
+
         Grpc.PlaceholderValue placeholderValue = new() { Tag = Constants.VectorTag };
 
         switch (vectors)
@@ -278,6 +290,12 @@ public partial class MilvusCollection
         HybridSearchParameters? parameters = null,
         CancellationToken cancellationToken = default)
     {
+        if (_client.RestClient is { } rest)
+        {
+            return await rest.HybridSearchAsync(this, requests, reranker, limit,
+                parameters, cancellationToken).ConfigureAwait(false);
+        }
+
         Grpc.HybridSearchRequest request = CreateHybridSearchRequest(requests, reranker, limit, parameters);
 
         Grpc.SearchResults response =
@@ -765,6 +783,11 @@ public partial class MilvusCollection
         CancellationToken cancellationToken = default)
     {
         Verify.NotNullOrWhiteSpace(expression);
+
+        if (_client.RestClient is { } rest)
+        {
+            return await rest.QueryAsync(this, expression, parameters, cancellationToken).ConfigureAwait(false);
+        }
 
         QueryRequest request = new()
         {
