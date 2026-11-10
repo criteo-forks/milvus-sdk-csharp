@@ -52,6 +52,32 @@ await milvusClient.CreateCollectionAsync(
         );
 ```
 
+### Collection properties
+
+Both the field-list and `CollectionSchema` creation overloads accept a
+`properties` argument. Properties are sent in the original gRPC creation request,
+not applied in a second call. Values are strings and are forwarded unchanged;
+null or empty properties send no entries. The new overloads place properties
+before the schema/field list, preserving existing overload resolution, including
+positional `default` arguments. Existing overloads retain their signatures and defaults.
+
+```csharp
+var collection = await milvusClient.CreateCollectionAsync(
+    "tenant_items",
+    properties: new Dictionary<string, string> {
+        ["partitionkey.isolation"] = "true"
+    },
+    fields: new[] {
+        FieldSchema.Create<long>("id", isPrimaryKey: true),
+        FieldSchema.CreateVarchar("tenant", 128, isPartitionKey: true),
+        FieldSchema.CreateFloatVector("vector", 128)
+    });
+```
+
+Milvus validates property support and prerequisites. Partition key isolation
+requires a partition key; for Milvus 2.6, use HNSW and filter searches on one
+partition-key value. See [Use Partition Key](https://milvus.io/docs/v2.6.x/use-partition-key.md).
+
 ### Insert vectors.
 
 ```csharp

@@ -46,6 +46,30 @@ public partial class MilvusClient
     }
 
     /// <summary>
+    /// Creates a new collection with collection-level properties.
+    /// </summary>
+    /// <param name="collectionName">The name of the collection to create.</param>
+    /// <param name="fields">The collection fields.</param>
+    /// <param name="properties">Collection properties, such as partitionkey.isolation. Values are sent unchanged.</param>
+    /// <param name="consistencyLevel">The collection consistency level. Defaults to Session.</param>
+    /// <param name="shardsNum">Number of shards.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public Task<MilvusCollection> CreateCollectionAsync(
+        string collectionName,
+        IReadOnlyDictionary<string, string>? properties,
+        IReadOnlyList<FieldSchema> fields,
+        ConsistencyLevel consistencyLevel = ConsistencyLevel.Session,
+        int shardsNum = 1,
+        CancellationToken cancellationToken = default)
+    {
+        Verify.NotNullOrWhiteSpace(collectionName);
+        Verify.NotNull(fields);
+
+        return CreateCollectionAsync(collectionName, properties, new CollectionSchema(fields),
+            consistencyLevel, shardsNum, cancellationToken);
+    }
+
+    /// <summary>
     /// Creates a new collection.
     /// </summary>
     /// <param name="collectionName">The name of the collection to create.</param>
@@ -57,8 +81,26 @@ public partial class MilvusClient
     /// <param name="cancellationToken">
     /// The token to monitor for cancellation requests. The default value is <see cref="CancellationToken.None" />.
     /// </param>
+    public Task<MilvusCollection> CreateCollectionAsync(
+        string collectionName,
+        CollectionSchema schema,
+        ConsistencyLevel consistencyLevel = ConsistencyLevel.Session,
+        int shardsNum = 1,
+        CancellationToken cancellationToken = default)
+        => CreateCollectionAsync(collectionName, null, schema, consistencyLevel, shardsNum, cancellationToken);
+
+    /// <summary>
+    /// Creates a new collection with collection-level properties in the creation request.
+    /// </summary>
+    /// <param name="collectionName">The name of the collection to create.</param>
+    /// <param name="schema">The collection schema.</param>
+    /// <param name="properties">Collection properties, such as partitionkey.isolation. Null or empty sends no properties.</param>
+    /// <param name="consistencyLevel">The collection consistency level. Defaults to Session.</param>
+    /// <param name="shardsNum">Number of shards.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<MilvusCollection> CreateCollectionAsync(
         string collectionName,
+        IReadOnlyDictionary<string, string>? properties,
         CollectionSchema schema,
         ConsistencyLevel consistencyLevel = ConsistencyLevel.Session,
         int shardsNum = 1,
@@ -186,6 +228,14 @@ public partial class MilvusClient
             ShardsNum = shardsNum,
             Schema = grpcCollectionSchema.ToByteString()
         };
+
+        if (properties is not null)
+        {
+            foreach (var property in properties)
+            {
+                request.Properties.Add(new Grpc.KeyValuePair { Key = property.Key, Value = property.Value });
+            }
+        }
 
         await InvokeAsync(GrpcClient.CreateCollectionAsync, request, cancellationToken).ConfigureAwait(false);
         RestClient?.InvalidateMetadata();
