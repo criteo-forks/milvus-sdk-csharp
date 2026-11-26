@@ -123,6 +123,11 @@ public sealed class FieldSchema
     /// verbatim to the server — the SDK does not validate or reformat the JSON.
     /// Available since Milvus v2.5.
     /// </param>
+    /// <param name="enableMatch">
+    /// Builds an inverted index of the analyzed terms so the field can be filtered with
+    /// <c>TEXT_MATCH</c>. Requires <paramref name="enableAnalyzer"/>. Available since Milvus v2.5. See
+    /// <see href="https://milvus.io/docs/keyword-match.md"/>.
+    /// </param>
     public static FieldSchema CreateVarchar(
         string name,
         int maxLength,
@@ -133,12 +138,14 @@ public sealed class FieldSchema
         bool nullable = false,
         string? defaultValue = null,
         bool enableAnalyzer = false,
-        string? analyzerParams = null)
+        string? analyzerParams = null,
+        bool enableMatch = false)
         => new(name, MilvusDataType.VarChar, isPrimaryKey, autoId, isPartitionKey, description, nullable, defaultValue)
         {
             MaxLength = maxLength,
             EnableAnalyzer = enableAnalyzer,
-            AnalyzerParams = analyzerParams
+            AnalyzerParams = analyzerParams,
+            EnableMatch = enableMatch
         };
 
     /// <summary>
@@ -393,6 +400,12 @@ public sealed class FieldSchema
     /// when <see cref="EnableAnalyzer"/> is <c>true</c>. Available since Milvus v2.5.
     /// </summary>
     public string? AnalyzerParams { get; set; }
+
+    /// <summary>
+    /// Builds an inverted index of the analyzed terms of this <see cref="MilvusDataType.VarChar"/> field so it
+    /// can be filtered with <c>TEXT_MATCH</c>. Requires <see cref="EnableAnalyzer"/>. Available since Milvus v2.5.
+    /// </summary>
+    public bool EnableMatch { get; set; }
 
     /// <summary>
     /// The internal Milvus ID assigned to this ID.
