@@ -52,6 +52,22 @@ await milvusClient.CreateCollectionAsync(
         );
 ```
 
+### Text match (Milvus 2.5+)
+
+Enable the analyzer and opt into a term index before creating the collection:
+
+```csharp
+var brand = FieldSchema.CreateVarchar("brand", maxLength: 200, enableAnalyzer: true);
+brand.EnableMatch = true;
+```
+
+Include `brand` in the collection fields to filter it with `TEXT_MATCH(brand, 'shoes')`.
+`EnableMatch` defaults to false and is returned by `DescribeAsync`. It is independent
+of BM25 analyzer settings. The standard analyzer matches normalized tokens rather
+than substrings or whole-field equality; multiple query terms use OR semantics.
+Existing collections need to be recreated with the flag enabled. The factory's
+existing signature is preserved so previously compiled callers remain compatible.
+
 ### Collection properties
 
 Both the field-list and `CollectionSchema` creation overloads accept a

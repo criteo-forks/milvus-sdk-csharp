@@ -43,4 +43,25 @@ public class FieldSchemaAnalyzerTests
         Assert.True(field.EnableAnalyzer);
         Assert.Equal(analyzerJson, field.AnalyzerParams);
     }
+
+    [Fact]
+    public void CreateVarchar_disables_match_by_default()
+    {
+        var field = FieldSchema.CreateVarchar("text", maxLength: 256, enableAnalyzer: true);
+
+        Assert.False(field.EnableMatch);
+    }
+
+    [Fact]
+    public void EnableMatch_can_be_enabled_without_changing_analyzer_settings()
+    {
+        var field = FieldSchema.CreateVarchar(
+            "text",
+            maxLength: 256,
+            enableAnalyzer: true);
+        field.EnableMatch = true;
+
+        Assert.True(field.EnableAnalyzer);
+        Assert.True(field.EnableMatch);
+    }
 }

@@ -395,6 +395,12 @@ public sealed class FieldSchema
     public string? AnalyzerParams { get; set; }
 
     /// <summary>
+    /// Builds an inverted index of the analyzed terms of this <see cref="MilvusDataType.VarChar"/> field so it
+    /// can be filtered with <c>TEXT_MATCH</c>. Requires <see cref="EnableAnalyzer"/>. Available since Milvus v2.5.
+    /// </summary>
+    public bool EnableMatch { get; set; }
+
+    /// <summary>
     /// The internal Milvus ID assigned to this ID.
     /// </summary>
     public long FieldId { get; }

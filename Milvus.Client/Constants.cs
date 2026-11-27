@@ -37,6 +37,12 @@ internal static class Constants
     internal const string AnalyzerParams = "analyzer_params";
 
     /// <summary>
+    /// Type-param key that builds an inverted index of the analyzed terms of a VarChar field, so it
+    /// can be filtered with <c>TEXT_MATCH</c>. Value: "true"/"false".
+    /// </summary>
+    internal const string EnableMatch = "enable_match";
+
+    /// <summary>
     /// Top parameter key name.
     /// </summary>
     internal const string TopK = "topk";
