@@ -832,7 +832,7 @@ public class FieldData<TData> : FieldData
     /// <exception cref="MilvusException"></exception>
     protected void Check()
     {
-        if (Data.Any() != true)
+        if (Data.Count == 0)
         {
             throw new MilvusException($"{nameof(FieldData)}.{nameof(Data)} is empty");
         }
