@@ -79,6 +79,11 @@ public partial class MilvusCollection
                     case Constants.AnalyzerParams:
                         milvusField.AnalyzerParams = parameter.Value;
                         break;
+
+                    case Constants.EnableMatch:
+                        milvusField.EnableMatch =
+                            bool.TryParse(parameter.Value, out bool enableMatch) && enableMatch;
+                        break;
                 }
             }
 
